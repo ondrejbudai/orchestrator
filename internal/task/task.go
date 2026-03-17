@@ -6,16 +6,42 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
 // PR records a pull request opened by the task.
 type PR struct {
-	URL    string `json:"url"`
-	Repo   string `json:"repo"`
-	Branch string `json:"branch"`
-	Base   string `json:"base"`
+	URL           string `json:"url"`
+	Repo          string `json:"repo"`
+	Branch        string `json:"branch"`
+	Base          string `json:"base"`
+	Number        int    `json:"number,omitempty"`
+	LastCommentID int64  `json:"last_comment_id,omitempty"`
+	Closed        bool   `json:"closed,omitempty"`
+}
+
+// PRNumberFromURL extracts the pull request number from a GitHub PR URL
+// of the form https://github.com/owner/repo/pull/42.
+func PRNumberFromURL(url string) (int, error) {
+	// Expected format: https://github.com/owner/repo/pull/NUMBER
+	const prefix = "/pull/"
+	idx := strings.LastIndex(url, prefix)
+	if idx == -1 {
+		return 0, fmt.Errorf("URL does not contain /pull/: %s", url)
+	}
+	numStr := url[idx+len(prefix):]
+	// Strip any trailing path components
+	if i := strings.Index(numStr, "/"); i != -1 {
+		numStr = numStr[:i]
+	}
+	n, err := strconv.Atoi(numStr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid PR number in URL %s: %w", url, err)
+	}
+	return n, nil
 }
 
 // GitHubResources holds GitHub-related resources created by the task.
@@ -141,7 +167,14 @@ func (d *Dir) SaveMetadata(name, description string, createdAt time.Time) error 
 }
 
 // AddPR appends a PR to the task state and persists it to disk.
+// It automatically populates the Number field from the URL if not set.
 func (d *Dir) AddPR(pr PR) error {
+	if pr.Number == 0 && pr.URL != "" {
+		if n, err := PRNumberFromURL(pr.URL); err == nil {
+			pr.Number = n
+		}
+	}
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -151,4 +184,23 @@ func (d *Dir) AddPR(pr PR) error {
 	}
 	s.Resources.GitHub.PRs = append(s.Resources.GitHub.PRs, pr)
 	return d.saveStateLocked(s)
+}
+
+// UpdatePR finds the PR with the given URL and applies the mutation function.
+// Returns an error if the PR is not found.
+func (d *Dir) UpdatePR(prURL string, fn func(*PR)) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	s, err := d.loadStateLocked()
+	if err != nil {
+		return err
+	}
+	for i := range s.Resources.GitHub.PRs {
+		if s.Resources.GitHub.PRs[i].URL == prURL {
+			fn(&s.Resources.GitHub.PRs[i])
+			return d.saveStateLocked(s)
+		}
+	}
+	return fmt.Errorf("PR not found: %s", prURL)
 }

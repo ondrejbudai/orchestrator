@@ -195,8 +195,9 @@ func TestSaveMetadataPreservesExistingState(t *testing.T) {
 	if len(s.Resources.GitHub.PRs) != 1 {
 		t.Fatalf("expected 1 PR after SaveMetadata, got %d", len(s.Resources.GitHub.PRs))
 	}
-	if s.Resources.GitHub.PRs[0] != pr {
-		t.Errorf("PR mismatch: got %+v, want %+v", s.Resources.GitHub.PRs[0], pr)
+	got := s.Resources.GitHub.PRs[0]
+	if got.URL != pr.URL || got.Repo != pr.Repo || got.Branch != pr.Branch || got.Base != pr.Base {
+		t.Errorf("PR mismatch: got %+v, want %+v", got, pr)
 	}
 }
 
@@ -213,6 +214,159 @@ func TestLoadState_NoFile(t *testing.T) {
 	}
 	if len(s.Resources.GitHub.PRs) != 0 {
 		t.Errorf("expected empty PRs, got %d", len(s.Resources.GitHub.PRs))
+	}
+}
+
+func TestPRNumberFromURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		want    int
+		wantErr bool
+	}{
+		{
+			name: "standard PR URL",
+			url:  "https://github.com/org/repo/pull/42",
+			want: 42,
+		},
+		{
+			name: "PR URL with trailing slash",
+			url:  "https://github.com/org/repo/pull/99/",
+			want: 99,
+		},
+		{
+			name: "PR URL with sub-path",
+			url:  "https://github.com/org/repo/pull/7/files",
+			want: 7,
+		},
+		{
+			name:    "no pull path",
+			url:     "https://github.com/org/repo/issues/5",
+			wantErr: true,
+		},
+		{
+			name:    "non-numeric PR number",
+			url:     "https://github.com/org/repo/pull/abc",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := PRNumberFromURL(tt.url)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("PRNumberFromURL(%q) = %d, want %d", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUpdatePR(t *testing.T) {
+	tests := []struct {
+		name    string
+		prURL   string
+		prs     []PR
+		mutate  func(*PR)
+		wantErr bool
+		check   func(t *testing.T, prs []PR)
+	}{
+		{
+			name:  "update LastCommentID",
+			prURL: "https://github.com/org/repo/pull/1",
+			prs: []PR{
+				{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main"},
+			},
+			mutate: func(pr *PR) { pr.LastCommentID = 42 },
+			check: func(t *testing.T, prs []PR) {
+				if prs[0].LastCommentID != 42 {
+					t.Errorf("LastCommentID = %d, want 42", prs[0].LastCommentID)
+				}
+			},
+		},
+		{
+			name:  "mark closed",
+			prURL: "https://github.com/org/repo/pull/1",
+			prs: []PR{
+				{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main"},
+			},
+			mutate: func(pr *PR) { pr.Closed = true },
+			check: func(t *testing.T, prs []PR) {
+				if !prs[0].Closed {
+					t.Error("expected Closed = true")
+				}
+			},
+		},
+		{
+			name:  "PR not found",
+			prURL: "https://github.com/org/repo/pull/999",
+			prs: []PR{
+				{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main"},
+			},
+			mutate:  func(pr *PR) {},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			td, err := Create(outputDir, "update-test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, pr := range tt.prs {
+				if err := td.AddPR(pr); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			err = td.UpdatePR(tt.prURL, tt.mutate)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			state, err := td.LoadState()
+			if err != nil {
+				t.Fatal(err)
+			}
+			tt.check(t, state.Resources.GitHub.PRs)
+		})
+	}
+}
+
+func TestAddPR_PopulatesNumber(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "number-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pr := PR{URL: "https://github.com/org/repo/pull/42", Repo: "org/repo", Branch: "fix", Base: "main"}
+	if err := td.AddPR(pr); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Resources.GitHub.PRs[0].Number != 42 {
+		t.Errorf("Number = %d, want 42", state.Resources.GitHub.PRs[0].Number)
 	}
 }
 
@@ -241,8 +395,9 @@ func TestAddPR(t *testing.T) {
 	if len(s.Resources.GitHub.PRs) != 1 {
 		t.Fatalf("expected 1 PR, got %d", len(s.Resources.GitHub.PRs))
 	}
-	if s.Resources.GitHub.PRs[0] != pr1 {
-		t.Errorf("PR mismatch: got %+v, want %+v", s.Resources.GitHub.PRs[0], pr1)
+	gotPR1 := s.Resources.GitHub.PRs[0]
+	if gotPR1.URL != pr1.URL || gotPR1.Repo != pr1.Repo || gotPR1.Branch != pr1.Branch || gotPR1.Base != pr1.Base {
+		t.Errorf("PR mismatch: got %+v, want %+v", gotPR1, pr1)
 	}
 
 	// Add a second PR
@@ -263,8 +418,9 @@ func TestAddPR(t *testing.T) {
 	if len(s.Resources.GitHub.PRs) != 2 {
 		t.Fatalf("expected 2 PRs, got %d", len(s.Resources.GitHub.PRs))
 	}
-	if s.Resources.GitHub.PRs[1] != pr2 {
-		t.Errorf("second PR mismatch: got %+v, want %+v", s.Resources.GitHub.PRs[1], pr2)
+	gotPR2 := s.Resources.GitHub.PRs[1]
+	if gotPR2.URL != pr2.URL || gotPR2.Repo != pr2.Repo || gotPR2.Branch != pr2.Branch || gotPR2.Base != pr2.Base {
+		t.Errorf("second PR mismatch: got %+v, want %+v", gotPR2, pr2)
 	}
 
 	// Verify on-disk JSON structure

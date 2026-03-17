@@ -55,6 +55,19 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
+			name:      "daemon config parsed",
+			writeFile: true,
+			yaml:      "daemon:\n  poll_interval: \"30s\"\n  allowed_commenters:\n    - alice\n    - bob\n",
+			want: Config{
+				OutputDir: "./tasks",
+				GjollEnv:  "./configs/sandbox.tf",
+				Daemon: DaemonConfig{
+					PollInterval:      "30s",
+					AllowedCommenters: []string{"alice", "bob"},
+				},
+			},
+		},
+		{
 			name:      "invalid yaml",
 			writeFile: true,
 			yaml:      "{{invalid",

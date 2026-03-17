@@ -16,3 +16,11 @@
 # allowed_repos:
 #   - myorg/myrepo
 #   - myorg/*
+
+# Daemon configuration for automatic PR comment polling.
+# daemon:
+#   # How often the daemon completes a full cycle across all PRs.
+#   poll_interval: "60s"
+#   # Only comments from these GitHub users trigger task continue.
+#   allowed_commenters:
+#     - myuser

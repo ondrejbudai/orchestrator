@@ -8,11 +8,18 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+// DaemonConfig holds settings for the daemon polling loop.
+type DaemonConfig struct {
+	PollInterval      string   `yaml:"poll_interval"`
+	AllowedCommenters []string `yaml:"allowed_commenters"`
+}
+
 type Config struct {
-	SlackWebhook string   `yaml:"slack_webhook"`
-	OutputDir    string   `yaml:"output_dir"`
-	GjollEnv     string   `yaml:"gjoll_env"`
-	AllowedRepos []string `yaml:"allowed_repos"`
+	SlackWebhook string       `yaml:"slack_webhook"`
+	OutputDir    string       `yaml:"output_dir"`
+	GjollEnv     string       `yaml:"gjoll_env"`
+	AllowedRepos []string     `yaml:"allowed_repos"`
+	Daemon       DaemonConfig `yaml:"daemon"`
 }
 
 // RepoAllowed reports whether repo is permitted by the AllowedRepos allowlist.
