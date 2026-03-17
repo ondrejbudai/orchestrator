@@ -53,6 +53,7 @@ func init() {
 	taskContinueCmd.Flags().StringVar(&author, "author", "", "co-author to add to PR commits (e.g. \"Jane Doe <jane@example.com>\")")
 	taskCmd.AddCommand(taskNewCmd)
 	taskCmd.AddCommand(taskContinueCmd)
+	taskCmd.AddCommand(taskWatchCmd)
 }
 
 func runTask(cmd *cobra.Command, args []string) error {
